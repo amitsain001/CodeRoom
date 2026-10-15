@@ -1,0 +1,41 @@
+
+services:
+  # Relational database for permanent application data
+  postgres:
+    image: postgres:16-alpine
+    container_name: coderoom-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: coderoom
+      POSTGRES_USER: coderoom_user
+      POSTGRES_PASSWORD: local_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coderoom_user -d coderoom"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # In-memory data store for fast room state and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: coderoom-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+# Preserve database data across container restarts
+volumes:
+  postgres_data:
+  redis_data:

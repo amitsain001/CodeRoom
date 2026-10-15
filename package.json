@@ -1,0 +1,15 @@
+
+{
+  "name": "coderoom",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/client",
+    "apps/server"
+  ],
+  "scripts": {
+    "dev:client": "npm run dev --workspace=apps/client",
+    "dev:server": "npm run dev --workspace=apps/server",
+    "build:client": "npm run build --workspace=apps/client"
+  }
+}
