@@ -11,6 +11,7 @@ import authRoutes from "./modules/auth/auth.routes";
 import roomRoutes from "./modules/rooms/room.routes";
 import { initializeSocket } from "./config/socket";
 import { connectDatabase, pool } from "./config/database";
+import executionRoutes from "./modules/execution/execution.routes";
 import { redis } from "./config/redis";
 
 const app = express();
@@ -50,6 +51,7 @@ app.get("/health", async (_req: Request, res: Response) => {
 // API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomRoutes);
+app.use("/api/execution", executionRoutes);
 
 // Connect dependencies before accepting requests.
 async function startServer(): Promise<void> {
