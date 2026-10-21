@@ -1,4 +1,3 @@
-
 const JUDGE0_API_URL = (
   process.env.JUDGE0_API_URL || "https://ce.judge0.com"
 ).replace(/\/+$/, "");

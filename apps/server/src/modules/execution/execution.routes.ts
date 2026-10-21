@@ -4,6 +4,9 @@ import {
   getLanguages,
 } from "./judge0.service";
 
+import { executionRateLimiter } from "../../middleware/rateLimiter";
+import { authenticateToken } from "../../middleware/auth.middleware";
+
 const router = Router();
 
 // GET /api/execution/languages
@@ -28,7 +31,11 @@ router.get("/languages", async (_req: Request, res: Response) => {
 
 // POST /api/execution/run
 // Submits code to Judge0 and returns its execution result.
-router.post("/run", async (req: Request, res: Response) => {
+router.post(
+  "/run",
+  authenticateToken,
+  executionRateLimiter,
+  async (req: Request, res: Response) => {
   try {
     const { sourceCode, languageId, stdin = "" } = req.body ?? {};
 
