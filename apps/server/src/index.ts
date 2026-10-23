@@ -63,7 +63,7 @@ async function startServer(): Promise<void> {
     await redis.ping();
 
     // Start the same HTTP server used by Socket.IO.
-    httpServer.listen(PORT, () => {
+    httpServer.listen(PORT, "0.0.0.0" , () => {
       console.log(`CodeRoom server running on port ${PORT}`);
     });
   } catch (error) {
