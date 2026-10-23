@@ -13,6 +13,7 @@ import { initializeSocket } from "./config/socket";
 import { connectDatabase, pool } from "./config/database";
 import executionRoutes from "./modules/execution/execution.routes";
 import { redis } from "./config/redis";
+import aiRoutes from "./modules/ai/ai.routes";
 
 const app = express();
 
@@ -52,6 +53,8 @@ app.get("/health", async (_req: Request, res: Response) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomRoutes);
 app.use("/api/execution", executionRoutes);
+// New Phase 4 route.
+app.use("/api/ai", aiRoutes);
 
 // Connect dependencies before accepting requests.
 async function startServer(): Promise<void> {

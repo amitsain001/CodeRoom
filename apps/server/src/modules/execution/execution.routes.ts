@@ -82,11 +82,20 @@ router.post(
       result,
     });
   } catch (error) {
-    console.error("Code execution request failed:", error);
+    console.error(
+      "Code execution request failed:",
+      error instanceof Error ? error.message : error
+    );
 
     res.status(502).json({
       success: false,
       message: "Code execution service is temporarily unavailable.",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error instanceof Error
+            ? error.message
+            : "Unknown execution error"
+          : undefined,
     });
   }
 });
