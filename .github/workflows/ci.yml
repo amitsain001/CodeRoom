@@ -24,11 +24,15 @@ jobs:
       - name: Install dependencies
         run: npm ci --include=optional
 
-      - name: Install Linux Rolldown binding
-        run: npm install --no-save --include=optional @rolldown/binding-linux-x64-gnu
+      - name: Install Linux native bindings
+        run: |
+          npm install --no-save --include=optional @rolldown/binding-linux-x64-gnu
+          npm install --no-save --include=optional lightningcss-linux-x64-gnu
 
-      - name: Verify Rolldown native binding
-        run: npm ls rolldown @rolldown/binding-linux-x64-gnu --workspace=apps/client
+      - name: Verify native bindings
+        run: |
+          npm ls rolldown @rolldown/binding-linux-x64-gnu --workspace=apps/client
+          npm ls lightningcss lightningcss-linux-x64-gnu --workspace=apps/client
 
       - name: Run server tests
         run: npm run test --workspace=apps/server
