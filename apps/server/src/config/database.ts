@@ -1,6 +1,5 @@
 import dotenv from "dotenv";
 
-// Load the backend environment variables before reading them.
 dotenv.config();
 
 import { Pool } from "pg";
@@ -15,35 +14,28 @@ const parsedUrl = new URL(databaseUrl);
 
 const username = decodeURIComponent(parsedUrl.username);
 const password = decodeURIComponent(parsedUrl.password);
-const database = decodeURIComponent(
-  parsedUrl.pathname.slice(1)
-);
+const database = decodeURIComponent(parsedUrl.pathname.slice(1));
 
-if (!password) {
+if (!username || !password || !database) {
   throw new Error(
-    "PostgreSQL password is missing from DATABASE_URL"
+    "DATABASE_URL must contain a username, password, and database name"
   );
 }
 
-console.log("PostgreSQL configuration:", {
-  host: parsedUrl.hostname,
-  port: parsedUrl.port,
-  database,
-  usernamePresent: Boolean(username),
-  passwordPresent: Boolean(password),
-  passwordType: typeof password
-});
+const isNeon =
+  parsedUrl.hostname.endsWith(".neon.tech") ||
+  parsedUrl.hostname.endsWith(".neon.build");
 
 export const pool = new Pool({
-  host: parsedUrl.hostname,
-  port: Number(parsedUrl.port) || 5432,
-  database,
-  user: username,
-  password
+  connectionString: databaseUrl,
+  ssl: isNeon ? { rejectUnauthorized: true } : undefined,
+  max: 10,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
 });
 
 pool.on("error", (error) => {
-  console.error("Unexpected PostgreSQL error:", error.message);
+  console.error("Unexpected PostgreSQL pool error:", error.message);
 });
 
 export async function connectDatabase(): Promise<void> {
