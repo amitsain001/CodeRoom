@@ -25,14 +25,14 @@ jobs:
         run: npm cache clean --force
 
       - name: Install dependencies
-        run: npm ci --include=optional --no-audit --no-fund
+        run: npm ci --include=optional
 
       - name: Verify native dependencies
-        working-directory: apps/client
         run: |
-          node -e "console.log('rolldown:', require.resolve('rolldown'))"
-          node -e "console.log('lightningcss:', require.resolve('lightningcss'))"
-          npm ls rolldown lightningcss
+          npm ls vite rolldown lightningcss --workspace=apps/client
+          node -e "console.log('Platform:', process.platform, process.arch); console.log('Rolldown:', require.resolve('rolldown')); console.log('Lightning CSS:', require.resolve('lightningcss'))"
+          node --input-type=module -e "await import('rolldown'); console.log('Rolldown loaded successfully')"
+          node -e "require('lightningcss'); console.log('Lightning CSS loaded successfully')"
 
       - name: Run server tests
         run: npm run test --workspace=apps/server
