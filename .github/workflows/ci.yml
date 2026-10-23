@@ -28,8 +28,9 @@ jobs:
         run: npm ci --include=optional --no-audit --no-fund
 
       - name: Verify native dependencies
+        working-directory: apps/client
         run: |
-          npm ls rolldown lightningcss --workspace=apps/client
+          npm ls rolldown lightningcss
           node -e "console.log('Rolldown:', require.resolve('rolldown'))"
           node -e "console.log('Lightning CSS:', require.resolve('lightningcss'))"
 
