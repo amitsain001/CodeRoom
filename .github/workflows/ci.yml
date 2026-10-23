@@ -30,9 +30,9 @@ jobs:
       - name: Verify native dependencies
         working-directory: apps/client
         run: |
+          node -e "console.log('rolldown:', require.resolve('rolldown'))"
+          node -e "console.log('lightningcss:', require.resolve('lightningcss'))"
           npm ls rolldown lightningcss
-          node -e "console.log('Rolldown:', require.resolve('rolldown'))"
-          node -e "console.log('Lightning CSS:', require.resolve('lightningcss'))"
 
       - name: Run server tests
         run: npm run test --workspace=apps/server
