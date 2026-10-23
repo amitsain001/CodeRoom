@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --include=optional
 
+      - name: Install Linux Rolldown binding
+        run: npm install --no-save --include=optional @rolldown/binding-linux-x64-gnu
+
       - name: Verify Rolldown native binding
         run: npm ls rolldown @rolldown/binding-linux-x64-gnu --workspace=apps/client
 
