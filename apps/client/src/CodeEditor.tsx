@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { socket } from "./socket";
+import "./CodeEditor.css";
 
 // =============================================
 // Collaborative editing types
@@ -19,6 +20,8 @@ interface CodeLoad {
 
 interface CodeEditorProps {
   roomId: string;
+  token: string;
+  userRole: "candidate" | "interviewer";
 }
 
 // =============================================
@@ -176,14 +179,84 @@ console.log(nums.reduce((a, b) => a + b, 0));`,
 
 const DEFAULT_LANGUAGE_ID = 102;
 
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000"
+).replace(/\/+$/, "");
+
+function getCurrentAuthToken(fallbackToken: string): string {
+  // A prop can become stale after a sign-in in another tab or a re-auth flow.
+  // Prefer the current saved token, falling back to the supplied prop.
+  if (typeof window !== "undefined") {
+    return window.localStorage.getItem("coderoom_token") || fallbackToken || "";
+  }
+  return fallbackToken || "";
+}
+
+function notifyAuthExpired(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem("coderoom_token");
+  window.localStorage.removeItem("coderoom_user");
+  window.dispatchEvent(new CustomEvent("coderoom:auth-expired"));
+}
+
+async function readApiJson<T>(response: Response): Promise<T> {
+  if (response.status === 401) {
+    notifyAuthExpired();
+    throw new Error("Your session has expired. Please sign in again.");
+  }
+  return response.json() as Promise<T>;
+}
+
 // =============================================
 // Main CodeEditor component
 // =============================================
 
-export default function CodeEditor({ roomId }: CodeEditorProps) {
+export default function CodeEditor({ roomId, token, userRole }: CodeEditorProps) {
   const [code, setCode] = useState(
     starterCodeByLanguage.javascript,
   );
+
+  // Resizable editor/output split. The percentage is stored as a fraction
+  // of CSS grid tracks so long code can be given more horizontal space.
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const [editorPanePercent, setEditorPanePercent] = useState(56);
+  const [isResizing, setIsResizing] = useState(false);
+  const [isEditorMaximized, setIsEditorMaximized] = useState(false);
+  const [isNarrowLayout, setIsNarrowLayout] = useState(
+    typeof window !== "undefined" && window.innerWidth < 760,
+  );
+
+  useEffect(() => {
+    const updateLayout = () => setIsNarrowLayout(window.innerWidth < 760);
+    window.addEventListener("resize", updateLayout);
+    return () => window.removeEventListener("resize", updateLayout);
+  }, []);
+
+  function handleSplitPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (isNarrowLayout) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsResizing(true);
+  }
+
+  function handleSplitPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (!isResizing || !workspaceRef.current || isNarrowLayout) return;
+    const bounds = workspaceRef.current.getBoundingClientRect();
+    if (!bounds.width) return;
+    const percent = ((event.clientX - bounds.left) / bounds.width) * 100;
+    setEditorPanePercent(Math.max(30, Math.min(75, percent)));
+  }
+
+  function handleSplitPointerUp() {
+    setIsResizing(false);
+  }
+
+  function handleSplitKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const delta = event.key === "ArrowLeft" ? -3 : 3;
+    setEditorPanePercent((current) => Math.max(30, Math.min(75, current + delta)));
+  }
 
   const [languageId, setLanguageId] = useState(
     DEFAULT_LANGUAGE_ID,
@@ -222,6 +295,9 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
 
   const [isRunningTests, setIsRunningTests] = useState(false);
   const [testRunnerError, setTestRunnerError] = useState("");
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackError, setFeedbackError] = useState("");
+  const [aiReport, setAiReport] = useState<any>(null);
 
   // Collaborative editor state.
   const lastRemoteCode = useRef<string | null>(null);
@@ -347,12 +423,19 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
     selectedLanguageId: number,
     input: string,
   ): Promise<ExecutionResult> {
+    const currentToken = getCurrentAuthToken(token);
+    if (!currentToken) {
+      throw new Error("Your session is missing. Please sign in again.");
+    }
+
     const response = await fetch(
-      "http://localhost:5000/api/execution/run",
+      `${API_BASE_URL}/api/execution/run`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${currentToken}`,
+          Accept: "application/json",
         },
         body: JSON.stringify({
           sourceCode,
@@ -362,7 +445,7 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
       },
     );
 
-    const data = (await response.json()) as ExecutionResponse;
+    const data = await readApiJson<ExecutionResponse>(response);
 
     if (!response.ok || !data.success || !data.result) {
       throw new Error(
@@ -372,6 +455,46 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
     }
 
     return data.result;
+  }
+
+  async function handleGenerateFeedback() {
+    if (userRole !== "candidate") {
+      setFeedbackError("Only the candidate can submit a solution for AI feedback.");
+      return;
+    }
+    const currentToken = getCurrentAuthToken(token);
+    if (!currentToken) {
+      setFeedbackError("Your session is missing. Please sign in again.");
+      return;
+    }
+    setFeedbackLoading(true);
+    setFeedbackError("");
+    setAiReport(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/ai/rooms/${encodeURIComponent(roomId)}/feedback`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${currentToken}`,
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          submittedCode: code,
+          languageId,
+          language: selectedLanguage.name,
+          durationSeconds: 0,
+        }),
+      });
+      const payload = await readApiJson<any>(response);
+      if (!response.ok || !payload.success || !payload.data) {
+        throw new Error(payload.message || `AI feedback request failed (${response.status}).`);
+      }
+      setAiReport(payload.data.feedback ? payload.data : payload.data.data ?? payload.data);
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : "Unable to generate AI feedback.");
+    } finally {
+      setFeedbackLoading(false);
+    }
   }
 
   // =============================================
@@ -591,14 +714,25 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
 
   return (
     <section
+      className={`cr-code-editor${isEditorMaximized ? " cr-code-editor-maximized" : ""}`}
       style={{
-        marginTop: 24,
+        marginTop: isEditorMaximized ? 0 : 24,
         textAlign: "left",
         background: "#111827",
         color: "#f9fafb",
-        borderRadius: 12,
+        borderRadius: isEditorMaximized ? 0 : 12,
         overflow: "hidden",
         border: "1px solid #374151",
+        ...(isEditorMaximized ? {
+          position: "fixed",
+          inset: 0,
+          zIndex: 9999,
+          width: "100vw",
+          height: "100dvh",
+          maxWidth: "none",
+          display: "flex",
+          flexDirection: "column" as const,
+        } : {}),
       }}
     >
       {/* Toolbar */}
@@ -688,9 +822,44 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
         </div>
       </div>
 
+      <div
+        ref={workspaceRef}
+        className={`cr-workspace-grid${isResizing ? " is-resizing" : ""}`}
+        style={{
+          display: "grid",
+          gridTemplateColumns: isNarrowLayout
+            ? "minmax(0, 1fr)"
+            : `minmax(0, ${editorPanePercent}fr) 10px minmax(0, ${100 - editorPanePercent}fr)`,
+          alignItems: "stretch",
+          minWidth: 0,
+          width: "100%",
+          flex: isEditorMaximized ? "1 1 auto" : undefined,
+          minHeight: isEditorMaximized ? 0 : undefined,
+          overflow: isEditorMaximized ? "hidden" : undefined,
+          cursor: isResizing ? "col-resize" : undefined,
+        }}
+      >
+        <div className="cr-editor-pane" style={{ minWidth: 0, width: "100%" }}>
+          <div className="cr-pane-title" style={{ justifyContent: "space-between" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}><span className="cr-pane-dot" /> Solution editor</span>
+            <button
+              type="button"
+              onClick={() => setIsEditorMaximized((current) => !current)}
+              aria-label={isEditorMaximized ? "Restore split workspace" : "Maximize code editor"}
+              title={isEditorMaximized ? "Restore split workspace" : "Maximize code editor"}
+              style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: 34, height: 30, padding: 0, flex: "0 0 auto",
+                border: "1px solid #475569", borderRadius: 6,
+                background: "#1e293b", color: "#e2e8f0", cursor: "pointer",
+                fontSize: 18, lineHeight: 1,
+              }}
+            >{isEditorMaximized ? "❐" : "⛶"}</button>
+          </div>
+          <div className="cr-monaco-shell" style={isEditorMaximized ? { height: "calc(100dvh - 250px)", minHeight: 260, flex: "1 1 auto" } : undefined}>
       {/* Monaco editor */}
       <Editor
-        height="520px"
+        height="100%"
         language={selectedLanguage.editorLanguage}
         theme="vs-dark"
         value={code}
@@ -705,8 +874,9 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
         }}
       />
 
+          </div>
       {/* Custom stdin for Run Code */}
-      <div
+      <div className="cr-input-panel"
         style={{
           padding: 24,
           borderTop: "1px solid #374151",
@@ -746,8 +916,83 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
         />
       </div>
 
+        </div>
+
+        {!isNarrowLayout && (
+          <div
+            className="cr-workspace-divider"
+            role="separator"
+            aria-label="Resize editor and output panels"
+            aria-orientation="vertical"
+            aria-valuemin={30}
+            aria-valuemax={75}
+            aria-valuenow={Math.round(editorPanePercent)}
+            tabIndex={0}
+            onPointerDown={handleSplitPointerDown}
+            onPointerMove={handleSplitPointerMove}
+            onPointerUp={handleSplitPointerUp}
+            onPointerCancel={handleSplitPointerUp}
+            onKeyDown={handleSplitKeyDown}
+            style={{
+              width: 10,
+              minWidth: 10,
+              cursor: "col-resize",
+              touchAction: "none",
+              background: isResizing ? "#818cf8" : "#263449",
+              borderLeft: "1px solid #374151",
+              borderRight: "1px solid #374151",
+              position: "relative",
+              zIndex: 2,
+              alignSelf: "stretch",
+              outlineOffset: -2,
+            }}
+            title="Drag to resize panels (or use arrow keys)"
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                left: 3,
+                top: "50%",
+                transform: "translateY(-50%)",
+                width: 2,
+                height: 36,
+                borderLeft: "1px solid #cbd5e1",
+                borderRight: "1px solid #cbd5e1",
+                pointerEvents: "none",
+              }}
+            />
+          </div>
+        )}
+
+        <div
+          className="cr-results-pane"
+          style={{
+            minWidth: 0,
+            width: "100%",
+            // On phones, keep the output/test-case panel independently scrollable.
+            // Inline styles intentionally override the mobile CSS that sets
+            // overflow: visible, which was causing the lower test-case fields
+            // to be clipped by the editor card.
+            ...(isNarrowLayout
+              ? {
+                  height: isEditorMaximized ? "42dvh" : "70dvh",
+                  maxHeight: isEditorMaximized ? "42dvh" : "70dvh",
+                  minHeight: 240,
+                  overflowY: "auto" as const,
+                  overflowX: "hidden" as const,
+                  overscrollBehaviorY: "contain" as const,
+                  WebkitOverflowScrolling: "touch" as const,
+                  touchAction: "pan-y" as const,
+                }
+              : {
+                  overflowY: "auto" as const,
+                  overflowX: "hidden" as const,
+                }),
+          }}
+        >
       {/* Single execution output */}
-      <div
+      <div className="cr-result-section"
         style={{
           padding: 24,
           background: "#020617",
@@ -826,7 +1071,7 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
           Phase 3, Step 3: Test-case runner
           ======================================= */}
 
-      <div
+      <div className="cr-test-section"
         style={{
           padding: 24,
           background: "#111827",
@@ -923,16 +1168,18 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 12,
+                  alignItems: "flex-start",
+                  flexWrap: "wrap",
+                  minWidth: 0,
+                  gap: 10,
                   marginBottom: 16,
                 }}
               >
-                <strong style={{ fontSize: 17 }}>
+                <strong style={{ fontSize: 17, minWidth: 0, overflowWrap: "anywhere", flex: "1 1 90px" }}>
                   Test Case {index + 1}
                 </strong>
 
-                <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 10, minWidth: 0, maxWidth: "100%" }}>
                   {result && (
                     <strong style={{ color: statusColor }}>
                       {result.status === "passed"
@@ -952,6 +1199,9 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
                       border: "none",
                       color: "#f87171",
                       cursor: "pointer",
+                      padding: "4px 0",
+                      whiteSpace: "nowrap",
+                      flex: "0 0 auto",
                     }}
                   >
                     Remove
@@ -1103,6 +1353,30 @@ export default function CodeEditor({ roomId }: CodeEditorProps) {
             )}
           </div>
         )}
+      </div>
+
+      <div className="cr-feedback-section" style={{ padding: 24, borderTop: "2px solid #374151", background: "#0b1220", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <h3 style={{ margin: "0 0 6px", fontSize: 22 }}>AI interview feedback</h3>
+            <p style={{ margin: 0, color: "#9ca3af" }}>Submit your current solution to generate a report for this room.</p>
+          </div>
+          <button type="button" onClick={handleGenerateFeedback} disabled={feedbackLoading || userRole !== "candidate"} style={{ padding: "11px 16px", border: 0, borderRadius: 8, color: "white", background: feedbackLoading ? "#4b5563" : "#4f46e5", fontWeight: 700, cursor: feedbackLoading || userRole !== "candidate" ? "not-allowed" : "pointer" }}>
+            {feedbackLoading ? "Generating feedback…" : "Submit for AI Feedback"}
+          </button>
+        </div>
+        {userRole !== "candidate" && <p style={{ color: "#9ca3af" }}>AI feedback submission is available to the candidate assigned to this room.</p>}
+        {feedbackError && <p role="alert" style={{ color: "#fca5a5", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{feedbackError}</p>}
+        {aiReport && <div style={{ marginTop: 18, maxHeight: 420, overflowY: "auto", overflowWrap: "anywhere", padding: 18, borderRadius: 10, background: "#111827", border: "1px solid #374151" }}>
+          <h4 style={{ marginTop: 0 }}>Interview report · Score {aiReport.score ?? aiReport.feedback?.correctnessScore ?? "—"}</h4>
+          <p style={{ whiteSpace: "pre-wrap" }}>{aiReport.feedback?.summary ?? "Feedback generated successfully."}</p>
+          {Array.isArray(aiReport.feedback?.strengths) && <><strong>Strengths</strong><ul>{aiReport.feedback.strengths.map((item: string, i: number) => <li key={`s-${i}`}>{item}</li>)}</ul></>}
+          {Array.isArray(aiReport.feedback?.improvements) && <><strong>Areas to improve</strong><ul>{aiReport.feedback.improvements.map((item: string, i: number) => <li key={`i-${i}`}>{item}</li>)}</ul></>}
+          <p><strong>Time complexity:</strong> {aiReport.feedback?.timeComplexity ?? "—"}</p>
+          <p><strong>Space complexity:</strong> {aiReport.feedback?.spaceComplexity ?? "—"}</p>
+        </div>}
+      </div>
+        </div>
       </div>
     </section>
   );
