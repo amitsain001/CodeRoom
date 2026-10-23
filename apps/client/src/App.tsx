@@ -528,7 +528,7 @@ function EmptyState({
 // ======================================================
 
 function App() {
-  const [token, setToken] = useState("");
+  const [, setToken] = useState("");
   const [activeToken, setActiveToken] = useState(() => window.localStorage.getItem("coderoom_token") || "");
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
     try { const raw = window.localStorage.getItem("coderoom_user"); return raw ? JSON.parse(raw) as AuthUser : null; } catch { return null; }

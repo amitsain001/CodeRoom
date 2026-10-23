@@ -118,7 +118,7 @@ describe("CodeRoom Socket.IO events", () => {
         resolve();
       });
 
-      client.once("connect_error", (error) => {
+      client.once("connect_error", (error: Error) => {
         clearTimeout(timeout);
         reject(error);
       });
@@ -133,7 +133,7 @@ describe("CodeRoom Socket.IO events", () => {
         reject(new Error("Expected socket authentication to fail"));
       }, 4000);
 
-      client.once("connect_error", (error) => {
+      client.once("connect_error", (error: Error) => {
         clearTimeout(timeout);
         expect(error.message).toMatch(/authentication|token/i);
         resolve();

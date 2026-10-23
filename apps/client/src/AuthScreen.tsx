@@ -1,4 +1,5 @@
-import { FormEvent, useState } from "react";
+import { useState } from "react";
+import type { SyntheticEvent } from "react";
 import "./AuthScreen.css";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
@@ -16,7 +17,7 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (toke
   const [notice, setNotice] = useState("");
   const [signupRole, setSignupRole] = useState<"candidate" | "interviewer">("candidate");
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setNotice("");
     if (mode === "register" && signupRole === "interviewer") { setNotice("Interviewer accounts are provisioned by an administrator. Please sign in with an existing interviewer account or contact your administrator."); return; }
     setBusy(true);
